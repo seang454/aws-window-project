@@ -122,7 +122,7 @@ When deploying Linux servers on the cloud, **Ubuntu Server 24.04 LTS (Noble Numb
 | **Region & Zone** | `asia-southeast1` (Singapore) &rarr; `asia-southeast1-a` | Choose a region geographically close to your AWS region (e.g. AWS Singapore) for lowest network ping (<5ms). |
 | **Machine configuration** | **General-purpose** &rarr; Series: **E2** &rarr; Machine type: **`e2-micro`** | 2 vCPUs, 1 GB memory. Eligible for Google Cloud Free Tier. |
 | **Boot disk** | Click **Change** &rarr; OS: **Ubuntu** &rarr; Version: **Ubuntu 24.04 LTS x86/64** &rarr; Size: `20 GB` &rarr; Click **Select** | Modern Ubuntu LTS base with full cloud driver support. |
-| **Firewall** | ☑️ **ENABLE:** Check **Allow HTTP traffic**<br>☑️ **ENABLE:** Check **Allow HTTPS traffic** | Prepares the VM for web services and SSL traffic. |
+| **Firewall** | Leave HTTP/HTTPS unchecked (unless hosting a public web server). We will open **UDP 51820** in Step 3. | Keeps the GCP server private and secure, matching AWS. |
 
 3. Click the blue **Create** button at the bottom.
 
@@ -195,13 +195,15 @@ WireGuard requires **UDP port 51820** to be open on both cloud firewalls so encr
 3. Click **Save rules**.
 
 ### 🟨 On Google Cloud (GCP) Firewall:
-1. In GCP Console search bar &rarr; Type **Firewall** &rarr; Click **VPC firewall rules**.
-2. Click **Create Firewall Rule**:
+1. In the top search bar, type **firewall** &rarr; click **Firewall (VPC network)** (opens the *Firewall policies* / *VPC firewall rules* page).
+2. At the top of the screen (next to the page title), click the second button: **`➕ Create firewall rule`** *(do NOT click Create firewall policy)*.
+3. Fill in the firewall rule configuration:
    * **Name:** `allow-wireguard-51820`
-   * **Targets:** **All instances in the network**
-   * **Source IPv4 ranges:** `0.0.0.0/0` (or AWS's Public IPv4 address)
-   * **Protocols and ports:** Select **Specified protocols and ports** &rarr; Check **udp** &rarr; type `51820`.
-3. Click **Create**.
+   * **Network:** `default`
+   * **Targets:** Select **All instances in the network**
+   * **Source IPv4 ranges:** Type `0.0.0.0/0` (or AWS's Public IPv4 address)
+   * **Protocols and ports:** Select **Specified protocols and ports** &rarr; Check **☑ udp** &rarr; type `51820`
+4. Scroll to the bottom and click the blue **Create** button.
 
 ---
 
