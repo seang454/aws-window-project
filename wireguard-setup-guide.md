@@ -1,6 +1,6 @@
 # 🛡️ Manual WireGuard Site-to-Site Configuration Guide (AWS & Google Cloud)
 
-A complete, production-ready tutorial to launch Ubuntu instances, generate cryptographic keys, configure, and establish an encrypted peer-to-peer tunnel between **AWS EC2** and **Google Cloud (GCP)** using raw **WireGuard**, with detailed technical explanations of **WHY** each step, setting, and parameter is required.
+A complete, production-ready tutorial to launch Ubuntu instances, configure swap memory to prevent freezing, generate cryptographic keys, configure, and establish an encrypted peer-to-peer tunnel between **AWS EC2** and **Google Cloud (GCP)** using raw **WireGuard**, with detailed technical explanations of **WHY** each step, setting, and parameter is required.
 
 ---
 
@@ -10,14 +10,15 @@ A complete, production-ready tutorial to launch Ubuntu instances, generate crypt
 3. [Step 1: Launching Ubuntu Instances on AWS & Google Cloud](#3-step-1-launching-ubuntu-instances-on-aws--google-cloud)
    - [A. AWS EC2 Launch Flow & Field Explanations](#a-aws-ec2-launch-flow--field-explanations)
    - [B. Google Cloud Compute Engine Launch Flow & Field Explanations](#b-google-cloud-compute-engine-launch-flow--field-explanations)
-4. [Step 2: Cloud Firewall Rules (UDP 51820)](#4-step-2-cloud-firewall-rules-udp-51820)
-5. [Step 3: Install WireGuard on Both Nodes](#5-step-3-install-wireguard-on-both-nodes)
-6. [Step 4: Generate Cryptographic Key Pairs](#6-step-4-generate-cryptographic-key-pairs)
-7. [Step 5: Create Configuration Files (`wg0.conf`) & Parameter Breakdown](#7-step-5-create-configuration-files-wg0conf--parameter-breakdown)
-8. [Step 6: Enable Kernel IP Forwarding & Start Service](#8-step-6-enable-kernel-ip-forwarding--start-service)
-9. [Step 7: Test & Verify Tunnel Handshake](#9-step-7-test--verify-tunnel-handshake)
-10. [Bonus: Configuring WireGuard on Windows Server](#10-bonus-configuring-wireguard-on-windows-server)
-11. [Troubleshooting Common Issues](#11-troubleshooting-common-issues)
+4. [Step 2: Server Memory Optimization — Enabling 2GB SWAP (Fixes VS Code Freezing)](#4-step-2-server-memory-optimization--enabling-2gb-swap-fixes-vs-code-freezing)
+5. [Step 3: Cloud Firewall Rules (UDP 51820)](#5-step-3-cloud-firewall-rules-udp-51820)
+6. [Step 4: Install WireGuard on Both Nodes](#6-step-4-install-wireguard-on-both-nodes)
+7. [Step 5: Generate Cryptographic Key Pairs](#7-step-5-generate-cryptographic-key-pairs)
+8. [Step 6: Create Configuration Files (`wg0.conf`) & Parameter Breakdown](#8-step-6-create-configuration-files-wg0conf--parameter-breakdown)
+9. [Step 7: Enable Kernel IP Forwarding & Start Service](#9-step-7-enable-kernel-ip-forwarding--start-service)
+10. [Step 8: Test & Verify Tunnel Handshake](#10-step-8-test--verify-tunnel-handshake)
+11. [Bonus: Configuring WireGuard on Windows Server](#11-bonus-configuring-wireguard-on-windows-server)
+12. [Troubleshooting Common Issues](#12-troubleshooting-common-issues)
 
 ---
 
@@ -127,7 +128,61 @@ When deploying Linux servers on the cloud, **Ubuntu Server 24.04 LTS (Noble Numb
 
 ---
 
-## 4. Step 2: Cloud Firewall Rules (UDP 51820)
+## 4. Step 2: Server Memory Optimization — Enabling 2GB SWAP (Fixes VS Code Freezing)
+
+> ⚠️ **CRITICAL STEP FOR `t3.micro` / `e2-micro` (1 GB RAM Instances)**:
+> By default, cloud Linux instances come with **0 MB of Swap memory**. When VS Code Remote - SSH connects, its internal Node.js server consumes 500–700 MB of RAM, pushing total memory over 100% and causing the server to completely **freeze or disconnect**.
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ 🧠 Physical RAM (Hardware Memory):    1 GB (Fast)           │
+│ 💾 SSD Hard Drive (Storage Space):    20 GB (Large)         │
+└─────────────────────────────────────────────────────────────┘
+                                │
+               Borrow 2 GB from your SSD Hard Drive!
+                                │
+                                ▼
+┌─────────────────────────────────────────────────────────────┐
+│ 🚀 TOTAL USABLE MEMORY: 1 GB RAM + 2 GB SWAP = 3 GB TOTAL!  │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### How to Enable SWAP (Run via Terminal SSH right after launching):
+Connect to your instance using Windows PowerShell / Terminal (`ssh -i key.pem ubuntu@<IP>`) and run:
+
+```bash
+# 1. Allocate a 2 GB file on your SSD storage
+sudo fallocate -l 2G /swapfile
+
+# 2. Restrict permissions so only root can access it
+sudo chmod 600 /swapfile
+
+# 3. Format the file as Linux Swap space
+sudo mkswap /swapfile
+
+# 4. Activate the swap file immediately
+sudo swapon /swapfile
+
+# 5. Make the swap file permanent across server reboots
+echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+
+# 6. Clean up any corrupted VS Code cache from previous freezes
+rm -rf ~/.vscode-server
+
+# 7. Verify memory status
+free -h
+```
+
+**Expected Output:**
+```text
+               total        used        free      shared  buff/cache   available
+Mem:           952Mi       210Mi       500Mi       1.0Mi       242Mi       620Mi
+Swap:          2.0Gi          0B       2.0Gi  <-- ✅ 2 GB virtual memory active!
+```
+
+---
+
+## 5. Step 3: Cloud Firewall Rules (UDP 51820)
 
 WireGuard requires **UDP port 51820** to be open on both cloud firewalls so encrypted packets can reach the machines.
 
@@ -157,7 +212,7 @@ WireGuard requires **UDP port 51820** to be open on both cloud firewalls so encr
 
 ---
 
-## 5. Step 3: Install WireGuard on Both Nodes
+## 6. Step 4: Install WireGuard on Both Nodes
 
 SSH into **both** your AWS and GCP servers and run:
 
@@ -174,7 +229,7 @@ sudo apt update && sudo apt install -y wireguard iptables
 
 ---
 
-## 6. Step 4: Generate Cryptographic Key Pairs
+## 7. Step 5: Generate Cryptographic Key Pairs
 
 You must generate a private and public key pair on **each** server.
 
@@ -212,7 +267,7 @@ echo "GCP Public Key:  $(cat gcp_public.key)"
 
 ---
 
-## 7. Step 5: Create Configuration Files (`wg0.conf`) & Parameter Breakdown
+## 8. Step 6: Create Configuration Files (`wg0.conf`) & Parameter Breakdown
 
 ### A. On AWS EC2 Node 1 (`/etc/wireguard/wg0.conf`):
 ```ini
@@ -260,7 +315,7 @@ PersistentKeepalive = 25
 
 ---
 
-## 8. Step 6: Enable Kernel IP Forwarding & Start Service
+## 9. Step 7: Enable Kernel IP Forwarding & Start Service
 
 ### 1. Enable Kernel IP Forwarding:
 ```bash
@@ -282,7 +337,7 @@ sudo systemctl enable --now wg-quick@wg0
 
 ---
 
-## 9. Step 7: Test & Verify Tunnel Handshake
+## 10. Step 8: Test & Verify Tunnel Handshake
 
 ### 1. Check WireGuard Status:
 ```bash
@@ -321,7 +376,7 @@ peer: <PEER_PUBLIC_KEY>
 
 ---
 
-## 10. Bonus: Configuring WireGuard on Windows Server
+## 11. Bonus: Configuring WireGuard on Windows Server
 
 If one of your nodes is a **Windows Server**:
 
@@ -344,10 +399,11 @@ If one of your nodes is a **Windows Server**:
 
 ---
 
-## 11. Troubleshooting Common Issues
+## 12. Troubleshooting Common Issues
 
 | Issue | Root Cause | Technical Explanation & Fix |
 | :--- | :--- | :--- |
+| **VS Code Remote - SSH Freezes on connection** | Out of memory (0 MB swap default on 1 GB RAM instance). | Follow **Step 2** to allocate a 2 GB swap file and clean `~/.vscode-server`. |
 | **`latest handshake` is missing** | UDP 51820 blocked by cloud firewall. | Packets cannot reach the VM. Check AWS Security Group & GCP Firewall rules for `51820/UDP`. |
 | **`0 B received` in transfer** | Key mismatch or wrong Endpoint IP. | The receiver could not verify the cryptographic signature. Verify that AWS has GCP's Public Key, and GCP has AWS's Public Key. |
 | **Connection drops after 1–2 minutes** | NAT mapping expired on cloud gateway. | Ensure `PersistentKeepalive = 25` is present in the `[Peer]` section so heartbeats keep the NAT session alive. |
