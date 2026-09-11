@@ -277,27 +277,35 @@ sudo apt update && sudo apt install -y wireguard iptables
 You must generate a private and public key pair on **each** server.
 
 ### 🟧 On AWS Node (`aws-node-01`):
+Run this command block (uses `sudo bash -c` to grant proper permissions):
 ```bash
-sudo mkdir -p /etc/wireguard
+sudo bash -c '
+mkdir -p /etc/wireguard
 cd /etc/wireguard
 umask 077
 wg genkey | tee aws_private.key | wg pubkey > aws_public.key
 
-# Display keys
+echo "================================"
 echo "AWS Private Key: $(cat aws_private.key)"
 echo "AWS Public Key:  $(cat aws_public.key)"
+echo "================================"
+'
 ```
 
 ### 🟨 On GCP Node (`gcp-node-01`):
+Run this command block on Google Cloud:
 ```bash
-sudo mkdir -p /etc/wireguard
+sudo bash -c '
+mkdir -p /etc/wireguard
 cd /etc/wireguard
 umask 077
 wg genkey | tee gcp_private.key | wg pubkey > gcp_public.key
 
-# Display keys
+echo "================================"
 echo "GCP Private Key: $(cat gcp_private.key)"
 echo "GCP Public Key:  $(cat gcp_public.key)"
+echo "================================"
+'
 ```
 
 ---
