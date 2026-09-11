@@ -184,15 +184,51 @@ Swap:          2.0Gi          0B       2.0Gi  <-- ✅ 2 GB virtual memory active
 
 ## 5. Step 3: Cloud Firewall Rules (UDP 51820)
 
+### 💡 Important Concept: AWS Security Groups vs. Google Cloud Firewall Scope
+
+Before configuring the firewall, understand how AWS and Google Cloud handle firewall rules differently:
+
+#### 1. 🟧 On AWS: Security Groups apply to **Specific Instances** (Not the whole account)
+* An AWS Security Group acts like a **personal firewall attached to one specific virtual machine (NIC)**.
+* When you edit a security group (e.g. `launch-wizard-3`), it **only affects the EC2 instance(s) that have `launch-wizard-3` attached to them**.
+* If you launch a new instance tomorrow with a different security group, it will **NOT** have port 51820 open unless you attach `launch-wizard-3` to it.
+
+```
+AWS VPC:
+├── 🖥️ EC2 Instance 1 (Attached to 'launch-wizard-3') ──► Port 51820 OPEN ✅
+└── 🖥️ EC2 Instance 2 (Attached to 'default')         ──► Port 51820 CLOSED ❌
+```
+
+#### 2. 🟨 On Google Cloud (GCP): Firewall Rules apply to **The Whole VPC Network**
+* In Google Cloud, firewall rules live at the **VPC Network level**.
+* When you set **Targets = "All instances in the network"**, it automatically applies to **EVERY VM inside that VPC network**!
+
+```
+Google Cloud VPC (default):
+├── 🖥️ GCP VM 1 ──► Port 51820 OPEN ✅ (Automatically)
+└── 🖥️ GCP VM 2 ──► Port 51820 OPEN ✅ (Automatically)
+```
+
+#### 📊 Summary Scope Comparison:
+| Cloud | Firewall Concept | Default Scope |
+| :--- | :--- | :--- |
+| **🟧 AWS** | **Security Group** | **Per Instance:** Only protects the specific VMs you attach it to. |
+| **🟨 Google Cloud** | **VPC Firewall Rule** | **Whole Network:** Protects all VMs in that VPC (when Targets = *All instances*). |
+
+---
+
+### 🚀 How to Configure the Firewall Rules:
+
 WireGuard requires **UDP port 51820** to be open on both cloud firewalls so encrypted packets can reach the machines.
 
 ### 🟧 On AWS Security Group:
-1. In EC2 Console &rarr; Select `aws-node-01` &rarr; **Security** tab &rarr; Click the Security group link.
-2. Click **Edit inbound rules** &rarr; Click **Add rule**:
-   * **Type:** Custom UDP
+1. In EC2 Console &rarr; Select `aws-node-01` &rarr; **Security** tab &rarr; Click the Security group link (e.g., `launch-wizard-3`).
+2. On the Security Group page, select **Inbound rules** tab &rarr; Click **`Edit inbound rules`**.
+3. Click **`Add rule`**:
+   * **Type:** `Custom UDP`
    * **Port range:** `51820`
-   * **Source:** `0.0.0.0/0` (or GCP's Public IPv4 address).
-3. Click **Save rules**.
+   * **Source:** `0.0.0.0/0` (or `Anywhere-IPv4`).
+4. Click **Save rules**.
 
 ### 🟨 On Google Cloud (GCP) Firewall:
 1. In the top search bar, type **firewall** &rarr; click **Firewall (VPC network)** (opens the *Firewall policies* / *VPC firewall rules* page).
