@@ -382,9 +382,26 @@ sudo systemctl enable --now wg-quick@wg0
 
 ---
 
-> ### 🧠 Why Do We Have to Do This?
-> * **Why Enable `ip_forward`?** By default, the Linux kernel operates in "Host Only" mode—if a packet arrives on one interface (`eth0`) destined for another network (`wg0`), the kernel immediately drops it. Enabling `ip_forward=1` turns the Linux kernel into a **router**, allowing it to route packets across interfaces.
-> * **Why `wg-quick@wg0`?** `wg-quick` is an automated orchestration script that handles creating the `wg0` virtual interface, parsing `/etc/wireguard/wg0.conf`, adding kernel routing table rules, and attaching firewall hooks in a single command.
+### 🧠 Deep Dive: Why Both Commands are Required (RAM vs. Disk)
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 🛑 ip_forward = 0 (Default - Host Mode):                                    │
+│    Packet from Cloud ──► eth0 ──► [ Kernel drops packet ❌ ]                │
+│                                                                             │
+│ 🟢 ip_forward = 1 (Router Mode - WireGuard):                                │
+│    Packet from Cloud ──► eth0 ──► [ Kernel forwards to wg0 tunnel ✅ ]      │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+1. **`sudo sysctl -w net.ipv4.ip_forward=1` (Modifies Live RAM):**
+   * Modifies the active Linux Kernel parameter in live memory right now.
+   * *Limitation:* Cleared when the server reboots.
+2. **`echo "net.ipv4.ip_forward=1" | sudo tee -a /etc/sysctl.conf` (Saves to SSD Disk):**
+   * Appends the setting to the permanent system configuration file.
+   * *Purpose:* Ensures that every time the server reboots or restarts, Linux automatically loads and enables IP forwarding.
+3. **`sudo systemctl enable --now wg-quick@wg0`:**
+   * Starts the `wg0` virtual interface immediately and registers it with `systemd` so the VPN tunnel starts automatically on server boot.
 
 ---
 
