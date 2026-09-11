@@ -320,33 +320,58 @@ echo "================================"
 
 ## 8. Step 6: Create Configuration Files (`wg0.conf`) & Parameter Breakdown
 
-### A. On AWS EC2 Node 1 (`/etc/wireguard/wg0.conf`):
+### 📋 Values Checklist Before Creating Files:
+Make sure you have gathered these 4 values:
+1. **AWS Private Key:** Run on AWS &rarr; `sudo cat /etc/wireguard/aws_private.key`
+2. **AWS Public Key & Public IP:** Run on AWS &rarr; `sudo cat /etc/wireguard/aws_public.key` & check EC2 Public IPv4
+3. **GCP Private Key:** Run on GCP &rarr; `sudo cat /etc/wireguard/gcp_private.key`
+4. **GCP Public Key & Public IP:** Run on GCP &rarr; `sudo cat /etc/wireguard/gcp_public.key` & check GCP External IP
+
+---
+
+### A. 🟧 On AWS EC2 Node 1 (`/etc/wireguard/wg0.conf`):
+Run: `sudo nano /etc/wireguard/wg0.conf` and paste:
+
 ```ini
 [Interface]
+# AWS Virtual Tunnel IP
 Address = 10.0.0.1/24
 ListenPort = 51820
-PrivateKey = <AWS_PRIVATE_KEY>
+# Paste your AWS Private Key below:
+PrivateKey = <PASTE_YOUR_AWS_PRIVATE_KEY_HERE>
 
 [Peer]
-PublicKey = <GCP_PUBLIC_KEY>
-Endpoint = 34.120.100.80:51820
+# Paste Google Cloud's Public Key below:
+PublicKey = <PASTE_YOUR_GCP_PUBLIC_KEY_HERE>
+# Replace with your GCP VM's real External Public IP:
+Endpoint = <PASTE_YOUR_GCP_EXTERNAL_PUBLIC_IP_HERE>:51820
+# Route GCP's tunnel IP through this peer:
 AllowedIPs = 10.0.0.2/32
+# Keeps the connection open across cloud NAT firewalls:
 PersistentKeepalive = 25
 ```
 
 ---
 
-### B. On Google Cloud Node 2 (`/etc/wireguard/wg0.conf`):
+### B. 🟨 On Google Cloud Node 2 (`/etc/wireguard/wg0.conf`):
+Run: `sudo nano /etc/wireguard/wg0.conf` and paste:
+
 ```ini
 [Interface]
+# GCP Virtual Tunnel IP
 Address = 10.0.0.2/24
 ListenPort = 51820
-PrivateKey = <GCP_PRIVATE_KEY>
+# Paste your GCP Private Key below:
+PrivateKey = <PASTE_YOUR_GCP_PRIVATE_KEY_HERE>
 
 [Peer]
-PublicKey = <AWS_PUBLIC_KEY>
-Endpoint = 16.170.200.50:51820
+# Paste AWS's Public Key below:
+PublicKey = <PASTE_YOUR_AWS_PUBLIC_KEY_HERE>
+# Replace with your AWS EC2 instance's real Public IPv4 address:
+Endpoint = <PASTE_YOUR_AWS_PUBLIC_IP_HERE>:51820
+# Route AWS's tunnel IP through this peer:
 AllowedIPs = 10.0.0.1/32
+# Keeps the connection open across cloud NAT firewalls:
 PersistentKeepalive = 25
 ```
 
@@ -363,6 +388,23 @@ PersistentKeepalive = 25
 | **`Endpoint`** | `[Peer]` | The public IP and port (`IP:51820`) of the remote peer where initial handshake packets are sent. |
 | **`AllowedIPs`** | `[Peer]` | **Crucial Double Role:**<br>1. **Routing Table:** Any traffic sent to `10.0.0.2` is routed into the `wg0` tunnel.<br>2. **Internal Firewall:** WireGuard will **drop and reject** any packet claiming to come from any IP address not listed in `AllowedIPs` (prevents IP spoofing). |
 | **`PersistentKeepalive = 25`** | `[Peer]` | **Essential for Cloud & NAT Firewalls:** Cloud NAT routers (like AWS NAT Gateway or GCP Cloud NAT) automatically close idle UDP connection states after 30–60 seconds. Sending a tiny heartbeat packet every 25 seconds forces the firewall state table to **keep the connection open 24/7**. |
+
+---
+
+### 📍 Deep Dive: What does `/32` mean and is this IP defined by YOU?
+
+#### 1. Yes! You define this IP 100% yourself:
+* **YOU** chose to give AWS the IP: `10.0.0.1`
+* **YOU** chose to give Google Cloud the IP: `10.0.0.2`
+* Because you chose those two IPs, in `AllowedIPs` you tell each node to send traffic to the other node's defined IP address!
+
+#### 2. Why `/24` in `[Interface]` vs. `/32` in `[Peer]`?
+* **`/24` (Subnet Range):** Represents 256 IPs (`10.0.0.0` &rarr; `10.0.0.255`). When you set `Address = 10.0.0.1/24`, it tells the local operating system: *"My `wg0` interface belongs to a 256-node virtual network."*
+* **`/32` (Single Specific IP):** Represents **EXACTLY 1 IP address** (no range). When you set `AllowedIPs = 10.0.0.2/32`, it tells WireGuard: *"The remote peer is ONLY allowed to represent this ONE exact IP (`10.0.0.2`)."*
+
+#### 3. Why this is crucial (Split Tunneling & Anti-Spoofing):
+* **Split Tunneling:** Only traffic specifically sent to `10.0.0.2` is encrypted and routed through the tunnel. Your normal web browsing and server updates continue running at full speed through your normal internet connection.
+* **Anti-Spoofing:** If a compromised node tries to send packets claiming to be from any other IP (like `192.168.1.1`), WireGuard **instantly drops them**.
 
 ---
 
