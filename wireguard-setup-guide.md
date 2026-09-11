@@ -104,7 +104,7 @@ When deploying Linux servers on the cloud, **Ubuntu Server 24.04 LTS (Noble Numb
 | **Application and OS Images (AMI)** | Click **Ubuntu** &rarr; Select **Ubuntu Server 24.04 LTS (HVM), SSD Volume Type** | Modern 64-bit OS with native WireGuard kernel module. Eligible for AWS Free Tier. |
 | **Instance type** | `t3.micro` (or `t2.micro`) | Provides 2 vCPUs and 1 GiB RAM. Covered under the 750 free hours/month AWS Free Tier. |
 | **Key pair (login)** | Select existing or click **Create new key pair** &rarr; Name: `aws-key` &rarr; Type: `RSA` &rarr; `.pem` | Used to SSH securely into your Ubuntu server using public-key authentication without passwords. |
-| **Network settings & Firewall** | [x] **Allow SSH traffic from Anywhere** (`0.0.0.0/0`)<br>[x] Click **Edit** &rarr; Add Rule: **Custom UDP**, Port **51820**, Source **Anywhere** | Port 22 lets you administer the server via SSH. Port 51820/UDP allows WireGuard tunnel traffic. |
+| **Network settings & Firewall** | ☑️ **ENABLE:** Check **Allow SSH traffic from Anywhere** (`0.0.0.0/0`)<br>☑️ **ADD RULE:** Click **Edit** &rarr; Add Rule: **Custom UDP**, Port **51820**, Source **Anywhere** | Port 22 lets you administer the server via SSH. Port 51820/UDP allows WireGuard tunnel traffic. |
 | **Configure storage** | `8 GiB` or `20 GiB` gp3 (General Purpose SSD) | Sufficient space for OS, WireGuard, Docker, and apps (up to 30 GB total is free on AWS). |
 
 3. Click **Launch instance** (bottom right).
@@ -122,7 +122,7 @@ When deploying Linux servers on the cloud, **Ubuntu Server 24.04 LTS (Noble Numb
 | **Region & Zone** | `asia-southeast1` (Singapore) &rarr; `asia-southeast1-a` | Choose a region geographically close to your AWS region (e.g. AWS Singapore) for lowest network ping (<5ms). |
 | **Machine configuration** | **General-purpose** &rarr; Series: **E2** &rarr; Machine type: **`e2-micro`** | 2 vCPUs, 1 GB memory. Eligible for Google Cloud Free Tier. |
 | **Boot disk** | Click **Change** &rarr; OS: **Ubuntu** &rarr; Version: **Ubuntu 24.04 LTS x86/64** &rarr; Size: `20 GB` &rarr; Click **Select** | Modern Ubuntu LTS base with full cloud driver support. |
-| **Firewall** | [x] **Allow HTTP traffic**<br>[x] **Allow HTTPS traffic** | Prepares the VM for web services and SSL traffic. |
+| **Firewall** | ☑️ **ENABLE:** Check **Allow HTTP traffic**<br>☑️ **ENABLE:** Check **Allow HTTPS traffic** | Prepares the VM for web services and SSL traffic. |
 
 3. Click the blue **Create** button at the bottom.
 
