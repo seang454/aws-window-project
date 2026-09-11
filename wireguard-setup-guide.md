@@ -1,19 +1,23 @@
 # 🛡️ Manual WireGuard Site-to-Site Configuration Guide (AWS & Google Cloud)
 
-A complete, production-ready tutorial to install, generate cryptographic keys, configure, and establish an encrypted peer-to-peer tunnel between **AWS EC2** and **Google Cloud (GCP)** using raw **WireGuard**, with detailed technical explanations of **WHY** each step and parameter is required.
+A complete, production-ready tutorial to launch Ubuntu instances, generate cryptographic keys, configure, and establish an encrypted peer-to-peer tunnel between **AWS EC2** and **Google Cloud (GCP)** using raw **WireGuard**, with detailed technical explanations of **WHY** each step, setting, and parameter is required.
 
 ---
 
 ## 📑 Table of Contents
 1. [Network IP Plan & Architecture](#1-network-ip-plan--architecture)
-2. [Step 1: Cloud Firewall Rules (UDP 51820)](#2-step-1-cloud-firewall-rules-udp-51820)
-3. [Step 2: Install WireGuard on Both Nodes](#3-step-2-install-wireguard-on-both-nodes)
-4. [Step 3: Generate Cryptographic Key Pairs](#4-step-3-generate-cryptographic-key-pairs)
-5. [Step 4: Create Configuration Files (`wg0.conf`) & Parameter Breakdown](#5-step-4-create-configuration-files-wg0conf--parameter-breakdown)
-6. [Step 5: Enable Kernel IP Forwarding & Start Service](#6-step-5-enable-kernel-ip-forwarding--start-service)
-7. [Step 6: Test & Verify Tunnel Handshake](#7-step-6-test--verify-tunnel-handshake)
-8. [Bonus: Configuring WireGuard on Windows Server](#8-bonus-configuring-wireguard-on-windows-server)
-9. [Troubleshooting Common Issues](#9-troubleshooting-common-issues)
+2. [Why Ubuntu Server for Cloud & WireGuard?](#2-why-ubuntu-server-for-cloud--wireguard)
+3. [Step 1: Launching Ubuntu Instances on AWS & Google Cloud](#3-step-1-launching-ubuntu-instances-on-aws--google-cloud)
+   - [A. AWS EC2 Launch Flow & Field Explanations](#a-aws-ec2-launch-flow--field-explanations)
+   - [B. Google Cloud Compute Engine Launch Flow & Field Explanations](#b-google-cloud-compute-engine-launch-flow--field-explanations)
+4. [Step 2: Cloud Firewall Rules (UDP 51820)](#4-step-2-cloud-firewall-rules-udp-51820)
+5. [Step 3: Install WireGuard on Both Nodes](#5-step-3-install-wireguard-on-both-nodes)
+6. [Step 4: Generate Cryptographic Key Pairs](#6-step-4-generate-cryptographic-key-pairs)
+7. [Step 5: Create Configuration Files (`wg0.conf`) & Parameter Breakdown](#7-step-5-create-configuration-files-wg0conf--parameter-breakdown)
+8. [Step 6: Enable Kernel IP Forwarding & Start Service](#8-step-6-enable-kernel-ip-forwarding--start-service)
+9. [Step 7: Test & Verify Tunnel Handshake](#9-step-7-test--verify-tunnel-handshake)
+10. [Bonus: Configuring WireGuard on Windows Server](#10-bonus-configuring-wireguard-on-windows-server)
+11. [Troubleshooting Common Issues](#11-troubleshooting-common-issues)
 
 ---
 
@@ -54,10 +58,6 @@ The Tunnel IP is assigned to the **Virtual Network Card (`wg0`)** created by Wir
   5. GCP receives the packet, **decrypts it**, and delivers it to the local app as coming from `10.0.0.1`.
 * **🛡️ Cryptokey Routing (Anti-Spoofing):** WireGuard cryptographically pairs each public key with its `AllowedIPs`. It will immediately drop any packet claiming to come from `10.0.0.2` if it was not signed with GCP's corresponding private key.
 
-#### 3. Real-World Analogy:
-* **Public IPs (`16.170.x.x` & `34.120.x.x`):** The **physical street address** on an envelope so the postal courier (the Internet) knows which building to deliver the package to.
-* **Tunnel IPs (`10.0.0.1` & `10.0.0.2`):** A **secret encrypted walkie-talkie channel** used by two people inside the buildings. Only they can speak and understand what is being transmitted on that channel.
-
 ---
 
 > ### 🧠 Why Do We Need a Separate Subnet (`10.0.0.0/24`)?
@@ -66,25 +66,87 @@ The Tunnel IP is assigned to the **Virtual Network Card (`wg0`)** created by Wir
 
 ---
 
-## 2. Step 1: Cloud Firewall Rules (UDP 51820)
+## 2. Why Ubuntu Server for Cloud & WireGuard?
 
-WireGuard requires **UDP port 51820** to be open on both cloud firewalls.
+When deploying Linux servers on the cloud, **Ubuntu Server 24.04 LTS (Noble Numbat)** or **22.04 LTS (Jammy Jellyfish)** is the top recommendation worldwide:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ 🐧 WHY UBUNTU SERVER IS THE BEST CHOICE:                                    │
+│                                                                             │
+│ 1. Native Kernel WireGuard: Linux Kernel 5.6+ has WireGuard built directly  │
+│    into the kernel (`kmod-wireguard`), giving near-zero CPU context loss.   │
+│                                                                             │
+│ 2. LTS Stability: Long-Term Support gives 5 full years of free security     │
+│    patches and rock-solid system stability.                                 │
+│                                                                             │
+│ 3. Cloud-Optimized Kernels: Both AWS and Google Cloud maintain customized    │
+│    kernels (`linux-aws` and `linux-gcp`) for maximum I/O performance.       │
+│                                                                             │
+│ 4. Massive Documentation: 90%+ of cloud networking & Kubernetes tutorials   │
+│    use Ubuntu syntax (`apt`, `systemd`, `netplan`).                         │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 3. Step 1: Launching Ubuntu Instances on AWS & Google Cloud
+
+### A. 🟧 AWS EC2 Launch Flow & Field Explanations
+
+1. Open **AWS Management Console** &rarr; Navigate to **EC2** &rarr; Click orange **Launch instances** button.
+2. Fill out the launch setup form as follows:
+
+| Field Name | What to Select / Type | 🧠 Why We Choose This |
+| :--- | :--- | :--- |
+| **Name and tags** | `aws-node-01` | Identifies this instance in your AWS EC2 dashboard. |
+| **Application and OS Images (AMI)** | Click **Ubuntu** &rarr; Select **Ubuntu Server 24.04 LTS (HVM), SSD Volume Type** | Modern 64-bit OS with native WireGuard kernel module. Eligible for AWS Free Tier. |
+| **Instance type** | `t3.micro` (or `t2.micro`) | Provides 2 vCPUs and 1 GiB RAM. Covered under the 750 free hours/month AWS Free Tier. |
+| **Key pair (login)** | Select existing or click **Create new key pair** &rarr; Name: `aws-key` &rarr; Type: `RSA` &rarr; `.pem` | Used to SSH securely into your Ubuntu server using public-key authentication without passwords. |
+| **Network settings & Firewall** | [x] **Allow SSH traffic from Anywhere** (`0.0.0.0/0`)<br>[x] Click **Edit** &rarr; Add Rule: **Custom UDP**, Port **51820**, Source **Anywhere** | Port 22 lets you administer the server via SSH. Port 51820/UDP allows WireGuard tunnel traffic. |
+| **Configure storage** | `8 GiB` or `20 GiB` gp3 (General Purpose SSD) | Sufficient space for OS, WireGuard, Docker, and apps (up to 30 GB total is free on AWS). |
+
+3. Click **Launch instance** (bottom right).
+
+---
+
+### B. 🟨 Google Cloud Compute Engine Launch Flow & Field Explanations
+
+1. Open **Google Cloud Console** &rarr; Navigate to **Compute Engine** &rarr; **VM instances** &rarr; Click **Create instance**.
+2. Fill out the configuration form as follows:
+
+| Field Name | What to Select / Type | 🧠 Why We Choose This |
+| :--- | :--- | :--- |
+| **Name** | `gcp-node-01` | Name of your virtual machine on Google Cloud. |
+| **Region & Zone** | `asia-southeast1` (Singapore) &rarr; `asia-southeast1-a` | Choose a region geographically close to your AWS region (e.g. AWS Singapore) for lowest network ping (<5ms). |
+| **Machine configuration** | **General-purpose** &rarr; Series: **E2** &rarr; Machine type: **`e2-micro`** | 2 vCPUs, 1 GB memory. Eligible for Google Cloud Free Tier. |
+| **Boot disk** | Click **Change** &rarr; OS: **Ubuntu** &rarr; Version: **Ubuntu 24.04 LTS x86/64** &rarr; Size: `20 GB` &rarr; Click **Select** | Modern Ubuntu LTS base with full cloud driver support. |
+| **Firewall** | [x] **Allow HTTP traffic**<br>[x] **Allow HTTPS traffic** | Prepares the VM for web services and SSL traffic. |
+
+3. Click the blue **Create** button at the bottom.
+
+---
+
+## 4. Step 2: Cloud Firewall Rules (UDP 51820)
+
+WireGuard requires **UDP port 51820** to be open on both cloud firewalls so encrypted packets can reach the machines.
 
 ### 🟧 On AWS Security Group:
-1. In EC2 Console &rarr; Select Instance &rarr; **Security** tab &rarr; Click **Security groups**.
-2. Click **Edit inbound rules** &rarr; **Add rule**:
+1. In EC2 Console &rarr; Select `aws-node-01` &rarr; **Security** tab &rarr; Click the Security group link.
+2. Click **Edit inbound rules** &rarr; Click **Add rule**:
    * **Type:** Custom UDP
    * **Port range:** `51820`
-   * **Source:** `0.0.0.0/0` (or the specific GCP Public IP).
+   * **Source:** `0.0.0.0/0` (or GCP's Public IPv4 address).
 3. Click **Save rules**.
 
 ### 🟨 On Google Cloud (GCP) Firewall:
-1. Go to **VPC network** &rarr; **Firewall** &rarr; Click **Create Firewall Rule**:
+1. In GCP Console search bar &rarr; Type **Firewall** &rarr; Click **VPC firewall rules**.
+2. Click **Create Firewall Rule**:
    * **Name:** `allow-wireguard-51820`
-   * **Targets:** All instances in the network
-   * **Source IPv4 ranges:** `0.0.0.0/0` (or the specific AWS Public IP)
-   * **Protocols and ports:** Check **Specified protocols and ports** &rarr; Check **udp** &rarr; type `51820`.
-2. Click **Create**.
+   * **Targets:** **All instances in the network**
+   * **Source IPv4 ranges:** `0.0.0.0/0` (or AWS's Public IPv4 address)
+   * **Protocols and ports:** Select **Specified protocols and ports** &rarr; Check **udp** &rarr; type `51820`.
+3. Click **Create**.
 
 ---
 
@@ -95,17 +157,13 @@ WireGuard requires **UDP port 51820** to be open on both cloud firewalls.
 
 ---
 
-## 3. Step 2: Install WireGuard on Both Nodes
+## 5. Step 3: Install WireGuard on Both Nodes
 
 SSH into **both** your AWS and GCP servers and run:
 
 ```bash
 # Ubuntu / Debian
 sudo apt update && sudo apt install -y wireguard iptables
-
-# Rocky Linux / RHEL / AlmaLinux
-sudo dnf install -y epel-release elrepo-release
-sudo dnf install -y kmod-wireguard wireguard-tools
 ```
 
 ---
@@ -116,11 +174,11 @@ sudo dnf install -y kmod-wireguard wireguard-tools
 
 ---
 
-## 4. Step 3: Generate Cryptographic Key Pairs
+## 6. Step 4: Generate Cryptographic Key Pairs
 
 You must generate a private and public key pair on **each** server.
 
-### 🟧 On AWS Node:
+### 🟧 On AWS Node (`aws-node-01`):
 ```bash
 sudo mkdir -p /etc/wireguard
 cd /etc/wireguard
@@ -132,7 +190,7 @@ echo "AWS Private Key: $(cat aws_private.key)"
 echo "AWS Public Key:  $(cat aws_public.key)"
 ```
 
-### 🟨 On GCP Node:
+### 🟨 On GCP Node (`gcp-node-01`):
 ```bash
 sudo mkdir -p /etc/wireguard
 cd /etc/wireguard
@@ -154,7 +212,7 @@ echo "GCP Public Key:  $(cat gcp_public.key)"
 
 ---
 
-## 5. Step 4: Create Configuration Files (`wg0.conf`) & Parameter Breakdown
+## 7. Step 5: Create Configuration Files (`wg0.conf`) & Parameter Breakdown
 
 ### A. On AWS EC2 Node 1 (`/etc/wireguard/wg0.conf`):
 ```ini
@@ -202,7 +260,7 @@ PersistentKeepalive = 25
 
 ---
 
-## 6. Step 5: Enable Kernel IP Forwarding & Start Service
+## 8. Step 6: Enable Kernel IP Forwarding & Start Service
 
 ### 1. Enable Kernel IP Forwarding:
 ```bash
@@ -224,7 +282,7 @@ sudo systemctl enable --now wg-quick@wg0
 
 ---
 
-## 7. Step 6: Test & Verify Tunnel Handshake
+## 9. Step 7: Test & Verify Tunnel Handshake
 
 ### 1. Check WireGuard Status:
 ```bash
@@ -263,7 +321,7 @@ peer: <PEER_PUBLIC_KEY>
 
 ---
 
-## 8. Bonus: Configuring WireGuard on Windows Server
+## 10. Bonus: Configuring WireGuard on Windows Server
 
 If one of your nodes is a **Windows Server**:
 
@@ -286,7 +344,7 @@ If one of your nodes is a **Windows Server**:
 
 ---
 
-## 9. Troubleshooting Common Issues
+## 11. Troubleshooting Common Issues
 
 | Issue | Root Cause | Technical Explanation & Fix |
 | :--- | :--- | :--- |
