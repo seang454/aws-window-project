@@ -1,0 +1,296 @@
+# 🛡️ Manual WireGuard Site-to-Site Configuration Guide (AWS & Google Cloud)
+
+A complete, production-ready tutorial to install, generate cryptographic keys, configure, and establish an encrypted peer-to-peer tunnel between **AWS EC2** and **Google Cloud (GCP)** using raw **WireGuard**, with detailed technical explanations of **WHY** each step and parameter is required.
+
+---
+
+## 📑 Table of Contents
+1. [Network IP Plan & Architecture](#1-network-ip-plan--architecture)
+2. [Step 1: Cloud Firewall Rules (UDP 51820)](#2-step-1-cloud-firewall-rules-udp-51820)
+3. [Step 2: Install WireGuard on Both Nodes](#3-step-2-install-wireguard-on-both-nodes)
+4. [Step 3: Generate Cryptographic Key Pairs](#4-step-3-generate-cryptographic-key-pairs)
+5. [Step 4: Create Configuration Files (`wg0.conf`) & Parameter Breakdown](#5-step-4-create-configuration-files-wg0conf--parameter-breakdown)
+6. [Step 5: Enable Kernel IP Forwarding & Start Service](#6-step-5-enable-kernel-ip-forwarding--start-service)
+7. [Step 6: Test & Verify Tunnel Handshake](#7-step-6-test--verify-tunnel-handshake)
+8. [Bonus: Configuring WireGuard on Windows Server](#8-bonus-configuring-wireguard-on-windows-server)
+9. [Troubleshooting Common Issues](#9-troubleshooting-common-issues)
+
+---
+
+## 1. Network IP Plan & Architecture
+
+```
+┌──────────────────────────────────────────────┐              ┌──────────────────────────────────────────────┐
+│                🟧 AMAZON AWS                 │              │            🟨 GOOGLE CLOUD (GCP)             │
+│                                              │              │                                              │
+│ • Hostname: `aws-node-01`                    │              │ • Hostname: `gcp-node-01`                    │
+│ • Public IPv4: `16.170.200.50` (Example)     │◄──WireGuard─►│ • Public IPv4: `34.120.100.80` (Example)     │
+│ • WG Listen Port: `51820/UDP`                │   Encrypted  │ • WG Listen Port: `51820/UDP`                │
+│ • WG Tunnel IP: `10.0.0.1/24`                │    Tunnel    │ • WG Tunnel IP: `10.0.0.2/24`                │
+└──────────────────────────────────────────────┘              └──────────────────────────────────────────────┘
+```
+
+---
+
+### 📍 Deep Dive: What is the Tunnel IP (`10.0.0.1/24`), Where Does It Come From, and What is It Used For?
+
+#### 1. Where Does This IP Come From?
+**You invent and choose this IP yourself!**
+* It is **NOT** assigned by AWS, Google Cloud, or an internet service provider (ISP).
+* It is a **Virtual Private IP** defined in `wg0.conf` using standard private IP ranges ([RFC 1918](https://en.wikipedia.org/wiki/Private_network)):
+  * `10.0.0.0` – `10.255.255.255`
+  * `172.16.0.0` – `172.31.255.255`
+  * `192.168.0.0` – `192.168.255.255`
+* You can choose any private subnet (e.g., `10.0.0.1` and `10.0.0.2`, or `192.168.50.1` and `192.168.50.2`), as long as it does not clash with your existing AWS or GCP VPC subnets.
+
+#### 2. What is It Used For?
+The Tunnel IP is assigned to the **Virtual Network Card (`wg0`)** created by WireGuard inside your server:
+* **🔒 Isolated Communication:** Your databases, APIs, or Kubernetes nodes bind directly to `10.0.0.1` or `10.0.0.2`. Because these IPs do not exist on the public internet, hackers cannot scan or attack your services directly.
+* **📦 The Secret Walkie-Talkie (Routing & Encapsulation):**
+  1. An application sends data to `10.0.0.2`.
+  2. The Linux kernel routes it into the `wg0` virtual interface.
+  3. WireGuard **encrypts the data** using GCP's public key.
+  4. WireGuard wraps the encrypted payload in an outer UDP packet and sends it across the public internet to GCP's real public IP (`34.120.100.80:51820`).
+  5. GCP receives the packet, **decrypts it**, and delivers it to the local app as coming from `10.0.0.1`.
+* **🛡️ Cryptokey Routing (Anti-Spoofing):** WireGuard cryptographically pairs each public key with its `AllowedIPs`. It will immediately drop any packet claiming to come from `10.0.0.2` if it was not signed with GCP's corresponding private key.
+
+#### 3. Real-World Analogy:
+* **Public IPs (`16.170.x.x` & `34.120.x.x`):** The **physical street address** on an envelope so the postal courier (the Internet) knows which building to deliver the package to.
+* **Tunnel IPs (`10.0.0.1` & `10.0.0.2`):** A **secret encrypted walkie-talkie channel** used by two people inside the buildings. Only they can speak and understand what is being transmitted on that channel.
+
+---
+
+> ### 🧠 Why Do We Need a Separate Subnet (`10.0.0.0/24`)?
+> * **Prevents IP Collisions:** AWS default VPC subnets usually use `172.31.0.0/16`, while Google Cloud VPC uses `10.128.0.0/9`.
+> * **Isolated Overlay Interface:** Creating a dedicated virtual network (`10.0.0.0/24`) creates a clean, independent communication layer (`wg0`) that does not interfere with the underlying cloud network routing.
+
+---
+
+## 2. Step 1: Cloud Firewall Rules (UDP 51820)
+
+WireGuard requires **UDP port 51820** to be open on both cloud firewalls.
+
+### 🟧 On AWS Security Group:
+1. In EC2 Console &rarr; Select Instance &rarr; **Security** tab &rarr; Click **Security groups**.
+2. Click **Edit inbound rules** &rarr; **Add rule**:
+   * **Type:** Custom UDP
+   * **Port range:** `51820`
+   * **Source:** `0.0.0.0/0` (or the specific GCP Public IP).
+3. Click **Save rules**.
+
+### 🟨 On Google Cloud (GCP) Firewall:
+1. Go to **VPC network** &rarr; **Firewall** &rarr; Click **Create Firewall Rule**:
+   * **Name:** `allow-wireguard-51820`
+   * **Targets:** All instances in the network
+   * **Source IPv4 ranges:** `0.0.0.0/0` (or the specific AWS Public IP)
+   * **Protocols and ports:** Check **Specified protocols and ports** &rarr; Check **udp** &rarr; type `51820`.
+2. Click **Create**.
+
+---
+
+> ### 🧠 Why Do We Have to Do This?
+> * **Why UDP instead of TCP?** WireGuard exclusively uses UDP. Running TCP inside a TCP-based VPN tunnel causes a severe performance penalty called **"TCP Meltdown"** (where retransmission timers collide and choke the network). UDP allows raw, low-latency transmission.
+> * **Why Port 51820?** `51820` is the standard IANA-assigned default port for WireGuard.
+> * **Default Block Behavior:** Both AWS and GCP block all inbound traffic by default. If this port is not explicitly opened, WireGuard packets will be silently dropped before reaching your VM.
+
+---
+
+## 3. Step 2: Install WireGuard on Both Nodes
+
+SSH into **both** your AWS and GCP servers and run:
+
+```bash
+# Ubuntu / Debian
+sudo apt update && sudo apt install -y wireguard iptables
+
+# Rocky Linux / RHEL / AlmaLinux
+sudo dnf install -y epel-release elrepo-release
+sudo dnf install -y kmod-wireguard wireguard-tools
+```
+
+---
+
+> ### 🧠 Why Do We Have to Do This?
+> * **Kernel-Space Performance:** Unlike older VPNs (like OpenVPN) that run in slow "User Space" and constantly switch CPU context via `/dev/net/tun`, WireGuard is compiled directly into the **Linux Kernel (`kmod-wireguard`)**. This allows it to process cryptographic packets at near-wireline speeds with minimum CPU overhead.
+> * **`wireguard-tools`:** Installs the essential command-line utilities (`wg`, `wg-quick`) used to configure and manage tunnel interfaces.
+
+---
+
+## 4. Step 3: Generate Cryptographic Key Pairs
+
+You must generate a private and public key pair on **each** server.
+
+### 🟧 On AWS Node:
+```bash
+sudo mkdir -p /etc/wireguard
+cd /etc/wireguard
+umask 077
+wg genkey | tee aws_private.key | wg pubkey > aws_public.key
+
+# Display keys
+echo "AWS Private Key: $(cat aws_private.key)"
+echo "AWS Public Key:  $(cat aws_public.key)"
+```
+
+### 🟨 On GCP Node:
+```bash
+sudo mkdir -p /etc/wireguard
+cd /etc/wireguard
+umask 077
+wg genkey | tee gcp_private.key | wg pubkey > gcp_public.key
+
+# Display keys
+echo "GCP Private Key: $(cat gcp_private.key)"
+echo "GCP Public Key:  $(cat gcp_public.key)"
+```
+
+---
+
+> ### 🧠 Why Do We Have to Do This?
+> * **Curve25519 Public-Key Cryptography:** WireGuard uses asymmetric cryptography (similar to SSH keys). 
+>   * The **Private Key** is kept strictly secret on the local server to decrypt incoming data.
+>   * The **Public Key** is shared with the other cloud node so it can verify your identity and encrypt outgoing packets.
+> * **Why `umask 077`?** Sets strict Linux file permissions (`-rw-------`) ensuring that **only the root user** can read your private key file, protecting it from other users or compromised processes on the system.
+
+---
+
+## 5. Step 4: Create Configuration Files (`wg0.conf`) & Parameter Breakdown
+
+### A. On AWS EC2 Node 1 (`/etc/wireguard/wg0.conf`):
+```ini
+[Interface]
+Address = 10.0.0.1/24
+ListenPort = 51820
+PrivateKey = <AWS_PRIVATE_KEY>
+
+[Peer]
+PublicKey = <GCP_PUBLIC_KEY>
+Endpoint = 34.120.100.80:51820
+AllowedIPs = 10.0.0.2/32
+PersistentKeepalive = 25
+```
+
+---
+
+### B. On Google Cloud Node 2 (`/etc/wireguard/wg0.conf`):
+```ini
+[Interface]
+Address = 10.0.0.2/24
+ListenPort = 51820
+PrivateKey = <GCP_PRIVATE_KEY>
+
+[Peer]
+PublicKey = <AWS_PUBLIC_KEY>
+Endpoint = 16.170.200.50:51820
+AllowedIPs = 10.0.0.1/32
+PersistentKeepalive = 25
+```
+
+---
+
+### 🧠 Deep Dive: Why Every Single Parameter Exists
+
+| Parameter | Section | Technical Purpose ("Why We Need It") |
+| :--- | :---: | :--- |
+| **`Address`** | `[Interface]` | Assigns the static IP address to the virtual network adapter `wg0` on this local machine. |
+| **`ListenPort`** | `[Interface]` | Specifies which UDP port the Linux kernel should listen on for incoming encrypted WireGuard packets. |
+| **`PrivateKey`** | `[Interface]` | The local node's private cryptographic key used to authenticate itself and decrypt packets. |
+| **`PublicKey`** | `[Peer]` | The remote node's public key. WireGuard uses this to encrypt traffic destined for that peer and verify that received packets genuinely originated from them (**Cryptokey Routing**). |
+| **`Endpoint`** | `[Peer]` | The public IP and port (`IP:51820`) of the remote peer where initial handshake packets are sent. |
+| **`AllowedIPs`** | `[Peer]` | **Crucial Double Role:**<br>1. **Routing Table:** Any traffic sent to `10.0.0.2` is routed into the `wg0` tunnel.<br>2. **Internal Firewall:** WireGuard will **drop and reject** any packet claiming to come from any IP address not listed in `AllowedIPs` (prevents IP spoofing). |
+| **`PersistentKeepalive = 25`** | `[Peer]` | **Essential for Cloud & NAT Firewalls:** Cloud NAT routers (like AWS NAT Gateway or GCP Cloud NAT) automatically close idle UDP connection states after 30–60 seconds. Sending a tiny heartbeat packet every 25 seconds forces the firewall state table to **keep the connection open 24/7**. |
+
+---
+
+## 6. Step 5: Enable Kernel IP Forwarding & Start Service
+
+### 1. Enable Kernel IP Forwarding:
+```bash
+sudo sysctl -w net.ipv4.ip_forward=1
+echo "net.ipv4.ip_forward=1" | sudo tee -a /etc/sysctl.conf
+```
+
+### 2. Start & Enable WireGuard Service:
+```bash
+# Start WireGuard interface wg0 and enable on system reboot
+sudo systemctl enable --now wg-quick@wg0
+```
+
+---
+
+> ### 🧠 Why Do We Have to Do This?
+> * **Why Enable `ip_forward`?** By default, the Linux kernel operates in "Host Only" mode—if a packet arrives on one interface (`eth0`) destined for another network (`wg0`), the kernel immediately drops it. Enabling `ip_forward=1` turns the Linux kernel into a **router**, allowing it to route packets across interfaces.
+> * **Why `wg-quick@wg0`?** `wg-quick` is an automated orchestration script that handles creating the `wg0` virtual interface, parsing `/etc/wireguard/wg0.conf`, adding kernel routing table rules, and attaching firewall hooks in a single command.
+
+---
+
+## 7. Step 6: Test & Verify Tunnel Handshake
+
+### 1. Check WireGuard Status:
+```bash
+sudo wg show
+```
+
+**Expected Output:**
+```text
+interface: wg0
+  public key: <PUBLIC_KEY>
+  private key: (hidden)
+  listening port: 51820
+
+peer: <PEER_PUBLIC_KEY>
+  endpoint: 34.120.100.80:51820
+  allowed ips: 10.0.0.2/32
+  latest handshake: 14 seconds ago     <-- ✅ Confirms connection!
+  transfer: 1.42 KiB received, 1.88 KiB sent
+```
+
+### 2. Ping Across Clouds:
+* **From AWS:**
+  ```bash
+  ping -c 4 10.0.0.2
+  ```
+* **From Google Cloud:**
+  ```bash
+  ping -c 4 10.0.0.1
+  ```
+
+---
+
+> ### 🧠 Why Do We Have to Do This?
+> * **WireGuard is "Stealth & Silent by Design":** Unlike other VPNs, WireGuard **never responds to port scans or pings** if the request does not have a valid cryptographic signature. It does not send error messages or acknowledgments to unauthorized packets.
+> * **Why `latest handshake` is the true test:** A timestamp showing `latest handshake: X seconds ago` is the definitive cryptographic proof that both servers successfully exchanged keys and established an encrypted tunnel.
+
+---
+
+## 8. Bonus: Configuring WireGuard on Windows Server
+
+If one of your nodes is a **Windows Server**:
+
+1. Download and install **WireGuard for Windows** from [wireguard.com/install/](https://www.wireguard.com/install/).
+2. Open WireGuard &rarr; Click **Add Tunnel** &rarr; **Add empty tunnel...**.
+3. Replace the content with:
+   ```ini
+   [Interface]
+   PrivateKey = <AUTOMATICALLY_GENERATED_PRIVATE_KEY>
+   Address = 10.0.0.3/24
+   ListenPort = 51820
+
+   [Peer]
+   PublicKey = <AWS_OR_GCP_PUBLIC_KEY>
+   Endpoint = 16.170.200.50:51820
+   AllowedIPs = 10.0.0.0/24
+   PersistentKeepalive = 25
+   ```
+4. Click **Save** &rarr; Click **Activate**.
+
+---
+
+## 9. Troubleshooting Common Issues
+
+| Issue | Root Cause | Technical Explanation & Fix |
+| :--- | :--- | :--- |
+| **`latest handshake` is missing** | UDP 51820 blocked by cloud firewall. | Packets cannot reach the VM. Check AWS Security Group & GCP Firewall rules for `51820/UDP`. |
+| **`0 B received` in transfer** | Key mismatch or wrong Endpoint IP. | The receiver could not verify the cryptographic signature. Verify that AWS has GCP's Public Key, and GCP has AWS's Public Key. |
+| **Connection drops after 1–2 minutes** | NAT mapping expired on cloud gateway. | Ensure `PersistentKeepalive = 25` is present in the `[Peer]` section so heartbeats keep the NAT session alive. |
+| **`RTNETLINK answers: File exists`** | Interface `wg0` already running. | An old instance is locked. Run `sudo wg-quick down wg0` and then `sudo wg-quick up wg0`. |
