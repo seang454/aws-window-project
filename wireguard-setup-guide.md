@@ -223,12 +223,17 @@ WireGuard requires **UDP port 51820** to be open on both cloud firewalls so encr
 
 ### 🟧 On AWS Security Group:
 1. In EC2 Console &rarr; Select `aws-node-01` &rarr; **Security** tab &rarr; Click the Security group link (e.g., `launch-wizard-3`).
-2. On the Security Group page, select **Inbound rules** tab &rarr; Click **`Edit inbound rules`**.
-3. Click **`Add rule`**:
-   * **Type:** `Custom UDP`
-   * **Port range:** `51820`
-   * **Source:** `0.0.0.0/0` (or `Anywhere-IPv4`).
-4. Click **Save rules**.
+2. On the Security Group page, under the **Inbound rules** tab &rarr; Click the button **`Edit inbound rules`** *(this opens the rule manager)*.
+3. Click the **`Add rule`** button at the bottom left to create a **NEW row** *(⚠️ Do NOT edit or delete the existing SSH Port 22 row!)*.
+4. In the new row, fill in:
+   * **Type:** Select `Custom UDP`
+   * **Port range:** Type `51820`
+   * **Source:** Select `Anywhere-IPv4` (shows `0.0.0.0/0`).
+5. Click the orange **`Save rules`** button.
+
+> **✅ Verification:** Your Inbound rules table must now show **2 rules**:
+> * **Rule 1:** `SSH` | TCP | Port `22` | `0.0.0.0/0` *(For laptop SSH access)*
+> * **Rule 2:** `Custom UDP` | UDP | Port `51820` | `0.0.0.0/0` *(For WireGuard VPN tunnel)*
 
 ### 🟨 On Google Cloud (GCP) Firewall:
 1. In the top search bar, type **firewall** &rarr; click **Firewall (VPC network)** (opens the *Firewall policies* / *VPC firewall rules* page).
