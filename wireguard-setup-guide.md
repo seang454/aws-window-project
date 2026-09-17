@@ -19,6 +19,7 @@ A complete, production-ready tutorial to launch Ubuntu instances, configure swap
 10. [Step 8: Test & Verify Tunnel Handshake](#10-step-8-test--verify-tunnel-handshake)
 11. [Bonus: Configuring WireGuard on Windows Server](#11-bonus-configuring-wireguard-on-windows-server)
 12. [Troubleshooting Common Issues](#12-troubleshooting-common-issues)
+13. [When to Use WireGuard vs. When NOT to Use It (Kubernetes & Database Clustering)](#13-when-to-use-wireguard-vs-when-not-to-use-it-kubernetes--database-clustering)
 
 ---
 
@@ -518,3 +519,25 @@ If one of your nodes is a **Windows Server**:
 | **`0 B received` in transfer** | Key mismatch or wrong Endpoint IP. | The receiver could not verify the cryptographic signature. Verify that AWS has GCP's Public Key, and GCP has AWS's Public Key. |
 | **Connection drops after 1–2 minutes** | NAT mapping expired on cloud gateway. | Ensure `PersistentKeepalive = 25` is present in the `[Peer]` section so heartbeats keep the NAT session alive. |
 | **`RTNETLINK answers: File exists`** | Interface `wg0` already running. | An old instance is locked. Run `sudo wg-quick down wg0` and then `sudo wg-quick up wg0`. |
+
+---
+
+## 13. When to Use WireGuard vs. When NOT to Use It (Kubernetes & Database Clustering)
+
+### 🧭 The Decision Rule:
+* **Single Cloud (All VMs inside AWS or all inside GCP):** ❌ **Do NOT use WireGuard.** Your cloud VPC already connects all instances securely and privately at ultra-high speed (10–25 Gbps) with <1ms latency.
+* **Multi-Cloud / Hybrid (AWS + GCP + On-Premises + Laptops):** ✅ **YES, use WireGuard.** Acts as the encrypted private bridge connecting separate cloud networks.
+
+---
+
+### 📊 Summary Decision Matrix:
+
+| Architecture / Scenario | Do you use WireGuard? | Why? |
+| :--- | :---: | :--- |
+| **All 5 VMs in AWS VPC** | ❌ **No** | AWS VPC already connects them securely with private IPs (`172.31.x.x`). |
+| **3 VMs in AWS + 2 VMs in GCP** | ✅ **YES** | AWS and GCP are isolated networks; WireGuard connects them into 1 private network. |
+| **Multi-Cloud Kubernetes (K3s / Cilium)** | ✅ **YES** | Allows master nodes in AWS to manage worker pods in GCP over private `10.0.0.x` tunnel. |
+| **Multi-Cloud Database Replication** | ✅ **YES** | Lets PostgreSQL/MySQL replicate data privately across clouds without exposing port 5432/3306 to the public internet. |
+| **Company Office + AWS Cloud** | ✅ **YES** | Connects on-premises office servers to AWS EC2 without expensive dedicated hardware lines. |
+| **Developer Laptop to Cloud Cluster** | ✅ **YES** | Lets developers access internal databases (`10.0.0.1:5432`) securely from home. |
+
